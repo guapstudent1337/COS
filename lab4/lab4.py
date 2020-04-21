@@ -1,20 +1,31 @@
 # Const
-delta_T = 1/4000
-N = 65536
-q = 512
+delta_T = 1/1000
+N = 18250
+q = 1024
 
-def low_resolution_window_function(step_number):
+def data_file_to_array(file_name):
     """
-    :step_number: количество отсчётов
-    :returns: окно низкого разрешения
+    Преобразует данные из файла в массив амплитуд
+
+    :file_name: путь к файлу в формате строки
+    :returns: массив амплитуд
+
     """
     import numpy as np
 
-    low_resolution_window = []
-    for n in range(0, step_number):
-        low_resolution_window.append(np.exp(-(1/2) * ((n - (q/2))/(0.5 * (q/2)))**2))
+    array = []
+    with open(file_name, "r") as file:
+        for line in file:
+            if 'e+' in line:
+                int_part, power = line.strip().split('e+')
+                array.append(float(int_part)*(10**(int(power))))
+            elif 'e-' in line:
+                int_part, power = line.strip().split('e-')
+                array.append(float(int_part)*(10**(-int(power))))
+            else:
+                array.append(float(line.strip()))
 
-    return low_resolution_window
+    return np.array(array)
 
 
 def high_resolution_window_function(step_number):
@@ -173,44 +184,6 @@ def get_nonrecursive_filter_frequency_response(nonrecursive_filter, frequency_fo
     return frequency_response
 
 
-def signal_generate(time, harmonics):
-    """ 
-    Генерирует сигнал с заданными параметрами
-
-    :harmonics: гармоники сигнала в виде словаря {амплитуда:частота} для каждой гармоники
-    :time: отсчёты по х-оси
-    :returns: сигнал с заданными параметрами
-    """
-    from numpy import sin, pi, zeros
-
-    generated_signal = zeros(len(time))
-
-    for ind, harmonic in enumerate(harmonics):
-        generated_signal += harmonic/(ind + 1) * sin(2 * pi * harmonics[harmonic] * time)
-
-    return generated_signal 
-
-
-def compare_signals(regular_signal, filtered_signal, plot_range, shift_point):
-    """
-    Строит график сигнала и его АЧХ. Как бы показывает разницу между сигналами на графике 
-
-    :regular_signal: обычный сигнал
-    :filter_signal: фильтрованный сигнал
-    :shift_point: Точка сдвига фильтрованного сигнала. Нужна чтобы убрать задержку и было легче сравнить
-    сигналы
-    plot_range: отрезок на котором будет построен график
-    """
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    plt.figure()
-    plt.plot(plot_range, regular_signal[plot_range], label='Нефильтрованный') 
-    plt.plot(plot_range, filtered_signal[np.array(plot_range) + shift_point], label='Фильтрованный')
-    plt.xlabel('Отсчёты')
-    plt.ylabel('Амплитуда')
-    plt.legend()
-
 def signal_filtration_with_nonrecursive_filter(signal_to_filter, nonrecursive_filter):
     """
     Так как фильтрация с помощью нерекурсивных фильтров это ряд действий. Удобнее вынести этот процесс в
@@ -231,98 +204,67 @@ def signal_filtration_with_nonrecursive_filter(signal_to_filter, nonrecursive_fi
     return np.array(filtered_signal)
 
 
+def signal_plot(input_signal):
+    """
+    Строит график сигнала и амплитудного спектра
+
+    :input_signal: входной сигнал
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Вычисляем частоту сигнала
+    k = np.arange(0, int(len(input_signal)/2), 1)
+    frequency = k/(int(len(input_signal)) * delta_T)
+    
+    # Строим сигнал
+    plt.figure()
+    plt.xlabel('Отсчёты')
+    plt.ylabel('Амплитуда')
+    plt.plot(input_signal)
+
+
 def main():
     import numpy as np
     import matplotlib.pyplot as plt
-    from scipy.fft import ifft
+    from scipy.fft import ifft, fft
 
-    # Задаём характерестики сигнала, который будем генерировать
-    A0 = 5
-    A1 = 3
-    A2 = 4
-    
-    f0 = 171.36
-    f1 = 428.11
-    f2 = 362.33
+    # Импортируем файлы
+    discrete_signal = data_file_to_array('Lab04_Khasanov.dat')
+    bit0 = data_file_to_array('Lab04_Khasanov_bit0.dat')
+    bit1 = data_file_to_array('Lab04_Khasanov_bit1.dat')
 
-    signal_harmonics = {A0:f0, A1:f1, A2:f2}
-    signal_discritisation = np.linspace(0, N-1, N) * delta_T
+    # Строим графики сигналов
+    signal_plot(discrete_signal)
+    signal_plot(bit0)
+    signal_plot(bit1)
 
-    # Генерируем сигналы
-    lambd = 1
-    usuall_signal = signal_generate(signal_discritisation, signal_harmonics)
-    harmonic_noise_signal = usuall_signal + lambd * signal_generate(signal_discritisation, {1:557, 1:950})
-    gaussian_noise_signal = usuall_signal + lambd * np.random.normal(0, 1, N)
-   
     # Генереируем фильтр 
-    discrete_analog_filter = generate_filter('LPF', 'Chebyshev', 8, fv=500)
+    discrete_analog_filter = generate_filter('LPF', 'Chebyshev', 8, fv=10)
 
     # Вычисляем частоту
     k = np.linspace(0, q, q)
     frequency = k/(q * delta_T)
 
-    # Выводим АЧХ фильтра
-    plt.figure()
-    plt.plot(frequency[:int(q/2)], abs(discrete_analog_filter)[:int(q/2)])
-    plt.title('АЧХ дискритизированного фильтра по передаточной функции')
-    plt.xlabel('Частота, Гц')
-    plt.ylabel('Коэффициент подавления')
-
-    # Генерируем нерекурсивный фильтр и его АЧХ
+    # Генерируем нерекурсивный фильтр, применяем к нему функцию окна и строим его АЧХ
     nonrecursive_filter = get_nonrecursive_filter(discrete_analog_filter)
-    nonrecursive_filter_frequency_response = \
-            get_nonrecursive_filter_frequency_response(nonrecursive_filter, frequency)
-
-    # Применяем функцию окна выского разрешения на нерекурсивном фильтре и вычисляем АЧХ полученного фильтра
     nonrecursive_filter_with_window_function = nonrecursive_filter * high_resolution_window_function(q)
     nonrecursive_filter_with_window_function_frequency_response = \
             get_nonrecursive_filter_frequency_response(nonrecursive_filter_with_window_function, frequency)
 
-    # Выводим сравнение нерекурсивных фильтров с применением функции окна и без неё
+    # Строим АЧХ фильтра
     plt.figure()
     plt.plot(range(0, int((delta_T**(-1))/2)), 
-            nonrecursive_filter_frequency_response[:int((delta_T**(-1))/2)], label='Без функции окна')
-    plt.plot(range(0, int((delta_T**(-1))/2)), 
-            nonrecursive_filter_with_window_function_frequency_response[:int((delta_T**(-1))/2)], 
-            label='С функцией окна')
-    plt.title('Сравнение АЧХ фильтров')
+             nonrecursive_filter_with_window_function_frequency_response[:int((delta_T**(-1))/2)]) 
     plt.xlabel('Частота, Гц')
     plt.ylabel('Коэффициент подавления')
-    plt.legend()
-
-    # Выводим сравнение нерекурсивных фильтров с применением функции окна и без неё в логарифмических масштабах
-    plt.figure()
-    plt.plot(range(0, int((delta_T**(-1))/2)), 
-            nonrecursive_filter_frequency_response[:int((delta_T**(-1))/2)], label='Без функции окна')
-    plt.plot(range(0, int((delta_T**(-1))/2)), 
-            nonrecursive_filter_with_window_function_frequency_response[:int((delta_T**(-1))/2)], 
-            label='С функцией окна')
-    plt.title('Сравнение АЧХ фильтров')
     plt.xscale('log')
     plt.yscale('log')
-    plt.xlabel('Частота, Гц')
-    plt.ylabel('Коэффициент подавления')
-    plt.legend()
     
-    # Выставляем точку смещения фильтрованного сигнала и длинну выборки, которая будет выводиться
-    shift_point = 260 #130 для q = 256
-    range_const = 100
-    plot_range = range(0, range_const)
-
-    # Фильтруем сигнал и строим графики
-    filtered_usuall_signal = signal_filtration_with_nonrecursive_filter(usuall_signal, 
-            nonrecursive_filter_with_window_function)
-    compare_signals(usuall_signal, filtered_usuall_signal, plot_range, shift_point)
-
-    # Фильтруем сигнал и строим графики
-    filtered_gaussian_noise_signal = signal_filtration_with_nonrecursive_filter(gaussian_noise_signal, 
-            nonrecursive_filter_with_window_function)
-    compare_signals(gaussian_noise_signal, filtered_gaussian_noise_signal, plot_range, shift_point)
-
-    # Фильтруем сигнал и строим графики
-    filtered_harmonic_noise_signal = signal_filtration_with_nonrecursive_filter(harmonic_noise_signal, 
-            nonrecursive_filter_with_window_function)
-    compare_signals(harmonic_noise_signal, filtered_harmonic_noise_signal, plot_range, shift_point)
+    # Фильтруем сигнал и строим его график
+    filtered_signal = signal_filtration_with_nonrecursive_filter(discrete_signal, 
+                                                                 nonrecursive_filter_with_window_function)
+    signal_plot(filtered_signal)
 
     plt.show()
 
